@@ -1,5 +1,28 @@
-# Only parameters currently supported by the scaffold are listed here.
-# TODO(student): Design and implement camera parameters before adding them.
 /hikrobot_camera:
   ros__parameters:
     use_sim_time: false
+
+    # Camera registry (informational).
+    known_serials:
+      - "DB0178696"
+      - "DB1921820"
+
+    # Choose exactly ONE:
+    # 1) USB or GigE by serial:
+    selected_serial: "DB1921820"
+    # 2) GigE by IPv4 address:
+    selected_ip: ""
+
+    image_topic: "/image_raw"
+    frame_id: "camera"
+
+    # Current conversion path supports BayerRG8 -> ROS bgr8.
+    pixel_format: "BayerRG8"
+
+    # Units:
+    # exposure: microseconds
+    # gain: camera-native gain value
+    # frame_rate: frames per second
+    exposure: 10000.0
+    gain: 10.0
+    frame_rate: 60.0

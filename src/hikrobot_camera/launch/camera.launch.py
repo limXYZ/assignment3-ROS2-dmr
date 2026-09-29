@@ -1,4 +1,4 @@
-"""Launch the training scaffold; this does not implement a camera driver."""
+"""Launch the HIKROBOT MVS ROS 2 camera node."""
 
 from pathlib import Path
 
@@ -11,19 +11,22 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     default_params = str(
-        Path(get_package_share_directory('hikrobot_camera')) / 'config' / 'camera.yaml'
+        Path(get_package_share_directory("hikrobot_camera"))
+        / "config"
+        / "camera.yaml"
     )
+
     return LaunchDescription([
         DeclareLaunchArgument(
-            'params_file',
+            "params_file",
             default_value=default_params,
-            description='Absolute path to the ROS parameter YAML file.',
+            description="Absolute path to the ROS parameter YAML file.",
         ),
         Node(
-            package='hikrobot_camera',
-            executable='camera_node',
-            name='hikrobot_camera',
-            output='screen',
-            parameters=[LaunchConfiguration('params_file')],
+            package="hikrobot_camera",
+            executable="camera_node",
+            name="hikrobot_camera",
+            output="screen",
+            parameters=[LaunchConfiguration("params_file")],
         ),
     ])

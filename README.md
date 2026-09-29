@@ -1,103 +1,97 @@
-# RoboMaster assignment3 ROS2
-这份仓库提供一个基础工程，供你在 Ubuntu 22.04 / ROS 2 Humble 上，基于海康机器人 MVS SDK 完成相机功能包。
+# hikrobot_camera
 
-目前只有最小节点和启动配置，连接相机、发布图像、参数设置及断线重连需要你完成。目录划分仅供参考，你可以根据需要调整。
+ROS 2 Humble wrapper for the HIKROBOT MVS SDK.
 
-## 开始
+## Implemented behavior
 
-1. 点击 GitHub 页面右上角的 **Fork**，将仓库复制到你的账号下。
-2. 在你的 Fork 页面点击 **Code**，复制地址并克隆到本地：
+- Enumerates both USB3 Vision and GigE Vision MVS cameras.
+- Selects a USB/GigE camera by serial number, or a GigE camera by IPv4 address.
+- Reports missing devices and distinguishes common busy/in-use and access-denied open failures.
+- Publishes `sensor_msgs/msg/Image` using `rclcpp::SensorDataQoS()` (Best Effort).
+- Current image path: camera `BayerRG8` -> OpenCV BGR -> ROS `bgr8`.
+- Publishes width, height, encoding, endianness, step, full image data, `frame_id`, and timestamp.
+- Supports exposure, gain and frame-rate parameters with device-range validation and readback.
+- Exposure, gain and frame rate can be changed at runtime.
+- Device selection, topic, frame ID, pixel format and registry are startup-only.
+- Detects repeated acquisition failures, releases the camera, retries connection, reapplies valid configuration and restarts acquisition.
+- Releases SDK resources on shutdown.
+- Logs configured/read-back frame rate separately from measured receive/pipeline FPS.
 
-   ```bash
-   # 将下面的地址替换为你的 Fork 地址
-   git clone <你的 Fork 地址>
-   cd robomaster-camera-assignment
-   ```
+## Parameters
 
-3. 阅读 [ROS 2 教程](docs/ROS2Tutorial.md) 和 [作业要求](docs/assignment.md)，按下面的步骤构建并启动工程。
-4. 在自己的仓库中完成开发，提交并推送改动，最后提交你的 GitHub 仓库链接。
+`selected_serial` and `selected_ip` are mutually exclusive. Exactly one must be non-empty.
 
-[AGENTS.md](AGENTS.md) 用于约束 AI 助手的帮助范围：你可以用 AI 理解概念和分析问题，核心实现需要自己完成。
+- `known_serials`: list of registered/known camera serial numbers. This is informational and does not prevent using an unregistered serial.
+- `selected_serial`: selects either a USB or GigE camera by serial number.
+- `selected_ip`: selects a GigE camera by IPv4 address.
+- `image_topic`: ROS image topic, default `/image_raw`.
+- `frame_id`: ROS image header frame ID, default `camera`.
+- `pixel_format`: currently only `BayerRG8` is accepted because that is the implemented/tested conversion path.
+- `exposure`: exposure time in microseconds. The node queries the camera's current valid range before applying it.
+- `gain`: camera-native gain value. The node queries the camera's current valid range before applying it.
+- `frame_rate`: configured acquisition frame rate in FPS. The node queries the camera's current valid range before applying it.
 
-## 仓库结构
+Out-of-range exposure/gain/frame-rate updates are rejected. Startup configuration failure prevents acquisition from starting. Runtime updates are written to the device and then read back.
 
-```text
-robomaster-camera-assignment/          # 同时作为 colcon 工作空间
-├── AGENTS.md                         # AI 助教规范
-├── README.md
-├── docs/ROS2Tutorial.md              # ROS 2 教程
-├── docs/assignment.md                # 作业要求
-└── src/hikrobot_camera/              # ROS 2 功能包
-    ├── package.xml                   # 包信息与依赖
-    ├── CMakeLists.txt                # 构建与安装配置
-    ├── include/hikrobot_camera/
-    │   └── camera_node.hpp          # 节点声明
-    ├── src/
-    │   ├── main.cpp                 # 程序入口
-    │   └── camera_node.cpp          # 在这里开始实现
-    ├── launch/camera.launch.py       # 启动文件
-    ├── config/camera.yaml           # 参数配置
-    ├── cmake/                       # 可按需添加 SDK 查找模块
-    └── test/                        # 可按需添加测试
-```
+## Timestamp semantics
 
-## 环境与依赖
+`Image.header.stamp` is generated with the ROS node clock (`this->now()`) after the SDK frame has been received and converted. It is therefore a host-side ROS timestamp, **not** the camera hardware exposure timestamp.
 
-先安装 ROS 2 Humble 与开发工具，确保 `ros2`、`colcon` 和 `rosdep` 可用。
+`Image.header.frame_id` comes from the `frame_id` parameter.
 
-工程目前没有接入 MVS SDK。你需要从 [海康机器人下载中心](https://www.hikrobotics.com/cn/machinevision/service/download/?module=0) 下载适合系统架构的 SDK，阅读随附文档，并完成构建集成。ROS 和系统依赖可以通过 rosdep 安装，厂商 SDK 需要单独配置。
+For the published `bgr8` image:
 
-## 编译
+- `height` and `width` come from the received frame.
+- `encoding = "bgr8"`.
+- `is_bigendian = false`.
+- `step = width * 3`.
+- `data.size() = height * step`.
 
-在新终端中进入仓库根目录，运行：
+## Frame-rate semantics
 
-```bash
-source /opt/ros/humble/setup.bash
-# 仅当系统尚未初始化 rosdep 时执行一次：sudo rosdep init
-rosdep update
-rosdep install --from-paths src --ignore-src -r -y --rosdistro humble
-colcon build --symlink-install --packages-select hikrobot_camera
-```
+Three values should not be confused:
 
-本仓库本身就是工作空间，不需要再放到另一个工作空间的 `src` 中。如果你想使用已有工作空间，也可以只把 `src/hikrobot_camera` 放进去。
+1. `frame_rate` is the requested camera acquisition rate.
+2. The configuration log's `actual` value is the value read back from the camera node `AcquisitionFrameRate`.
+3. `Actual receive/pipeline FPS` is measured by this process while receiving, converting and publishing frames. It can be lower than the configured camera rate because Bayer-to-BGR conversion, memory copies, CPU scheduling and ROS publication consume time.
 
-## 运行
+`ros2 topic hz /image_raw` measures subscriber-observed ROS topic throughput and can differ again.
 
-另开终端，在仓库根目录运行：
+## Launch
 
-```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+Build and source the workspace, then:
+
+```zsh
+export ROS_DOMAIN_ID=42
 ros2 launch hikrobot_camera camera.launch.py
 ```
 
-如果你使用 Zsh，将环境脚本的 `.bash` 换为 `.zsh`。
+To use a different YAML file:
 
-初始工程会输出 `Training scaffold only` 并保持运行，按 Ctrl+C 退出。此时尚未实现相机功能，没有图像话题是正常的。
-
-你也可以指定自己的参数文件：
-
-```bash
+```zsh
 ros2 launch hikrobot_camera camera.launch.py params_file:=/absolute/path/to/camera.yaml
 ```
 
-当前 YAML 只配置了 `use_sim_time`。相机相关参数需要你在代码中声明并实现后，再加入配置文件。
+## Runtime parameter examples
 
-## 完成与提交
+```zsh
+ros2 param set /hikrobot_camera exposure 8000.0
+ros2 param set /hikrobot_camera gain 5.0
+ros2 param set /hikrobot_camera frame_rate 50.0
+```
 
-从 `camera_node.cpp` 的 TODO 开始，按 [作业要求](docs/assignment.md) 完成相机功能。你可以增加源文件或 SDK 封装类，并相应更新构建配置。
+Startup-only parameters are intentionally rejected if changed at runtime.
 
-完成后：
+## RViz2
 
-- 更新 README，说明 SDK 及依赖的安装方式、如何编译启动、有哪些可配置参数。如果有未完成的功能或已知问题，简单注明即可。
-- 将源代码、Launch 和参数配置推送到你的 Fork, 然后提交仓库链接到 2719850558@qq.com，格式为：第三次作业-班级-姓名（第三次作业-自动化2305-周湛昊）
+Add an **Image** display, select `/image_raw`, and use **Best Effort** reliability with **Volatile** durability to match the sensor-data publisher.
 
+## Reconnection
 
----
+After three consecutive acquisition failures, the node treats the camera as disconnected. It releases SDK resources and retries every second. Once the selected camera is available again, the node reopens it, reapplies pixel format, trigger mode (when supported), exposure, gain, white balance and frame rate, then restarts grabbing.
 
-## 在这里解释你的项目
+## Notes / limitations
 
-例如：
-
-1. 如何编译：
-2. 运行方式：
+- The Bayer conversion used here is `cv::COLOR_BayerBG2BGR`, selected from testing with the current camera/SDK image output.
+- GigE enumeration and selection are implemented from the installed MVS SDK structures (`stGigEInfo`, `nCurrentIp`, `chSerialNumber`). If no physical GigE camera is available during testing, document that the GigE path was compile-tested but not hardware-validated.
+- The current design performs acquisition, Bayer conversion and ROS publication in one capture thread. This is simple and robust, but conversion/publication can limit measured throughput below the configured camera FPS.
