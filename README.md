@@ -1,78 +1,103 @@
 # hikrobot_camera
 
-ROS 2 Humble wrapper for the HIKROBOT MVS SDK.
+HIKROBOT MVS SDK 的 ROS 2 Humble 封装。
 
-## Implemented behavior
+## 已实现的功能
 
-- Enumerates both USB3 Vision and GigE Vision MVS cameras.
-- Selects a USB/GigE camera by serial number, or a GigE camera by IPv4 address.
-- Reports missing devices and distinguishes common busy/in-use and access-denied open failures.
-- Publishes `sensor_msgs/msg/Image` using `rclcpp::SensorDataQoS()` (Best Effort).
-- Current image path: camera `BayerRG8` -> OpenCV BGR -> ROS `bgr8`.
-- Publishes width, height, encoding, endianness, step, full image data, `frame_id`, and timestamp.
-- Supports exposure, gain and frame-rate parameters with device-range validation and readback.
-- Exposure, gain and frame rate can be changed at runtime.
-- Device selection, topic, frame ID, pixel format and registry are startup-only.
-- Detects repeated acquisition failures, releases the camera, retries connection, reapplies valid configuration and restarts acquisition.
-- Releases SDK resources on shutdown.
-- Logs configured/read-back frame rate separately from measured receive/pipeline FPS.
+-枚举 USB3 Vision 和 GigE Vision 两种 MVS 相机。
 
-## Parameters
+按序列号选择 USB/GigE 相机，或按 IPv4 地址选择 GigE 相机。
 
-`selected_serial` and `selected_ip` are mutually exclusive. Exactly one must be non-empty.
+报告未发现设备的情况，并区分常见的设备被占用和访问被拒绝错误。
 
-- `known_serials`: list of registered/known camera serial numbers. This is informational and does not prevent using an unregistered serial.
-- `selected_serial`: selects either a USB or GigE camera by serial number.
-- `selected_ip`: selects a GigE camera by IPv4 address.
-- `image_topic`: ROS image topic, default `/image_raw`.
-- `frame_id`: ROS image header frame ID, default `camera`.
-- `pixel_format`: currently only `BayerRG8` is accepted because that is the implemented/tested conversion path.
-- `exposure`: exposure time in microseconds. The node queries the camera's current valid range before applying it.
-- `gain`: camera-native gain value. The node queries the camera's current valid range before applying it.
-- `frame_rate`: configured acquisition frame rate in FPS. The node queries the camera's current valid range before applying it.
+使用 rclcpp::SensorDataQoS()（Best Effort）发布 sensor_msgs/msg/Image。
 
-Out-of-range exposure/gain/frame-rate updates are rejected. Startup configuration failure prevents acquisition from starting. Runtime updates are written to the device and then read back.
+当前图像路径：相机 BayerRG8 → OpenCV BGR → ROS bgr8。
 
-## Timestamp semantics
+发布宽度、高度、编码、字节序、步长、完整图像数据、frame_id 和时间戳。
 
-`Image.header.stamp` is generated with the ROS node clock (`this->now()`) after the SDK frame has been received and converted. It is therefore a host-side ROS timestamp, **not** the camera hardware exposure timestamp.
+支持曝光、增益和帧率参数，带设备范围校验和读回验证。
 
-`Image.header.frame_id` comes from the `frame_id` parameter.
+曝光、增益和帧率可在运行时修改。
 
-For the published `bgr8` image:
+设备选择、话题、frame ID、像素格式和注册表仅在启动时设置。
 
-- `height` and `width` come from the received frame.
-- `encoding = "bgr8"`.
-- `is_bigendian = false`.
-- `step = width * 3`.
-- `data.size() = height * step`.
+检测到连续采集失败后，释放相机、重试连接、重新应用有效配置并重新开始采集。
 
-## Frame-rate semantics
+关闭时释放 SDK 资源。
+
+分别记录配置的/读回的帧率和实测的接收/流水线 FPS。
+
+## 参数
+
+selected_serial 和 selected_ip 互斥，必须恰好有一个非空。
+
+known_serials：已注册/已知相机序列号列表。这是信息性的，不会阻止使用未注册的序列号。
+
+selected_serial：按序列号选择 USB 或 GigE 相机。
+
+selected_ip：按 IPv4 地址选择 GigE 相机。
+
+image_topic：ROS 图像话题，默认 /image_raw。
+
+frame_id：ROS 图像 header 的 frame ID，默认 camera。
+
+pixel_format：目前仅接受 BayerRG8，因为这是已实现并测试过的转换路径。
+
+exposure：曝光时间，单位微秒。节点在应用前会查询相机当前的有效范围。
+
+gain：相机原生增益值。节点在应用前会查询相机当前的有效范围。
+
+frame_rate：配置的采集帧率，单位 FPS。节点在应用前会查询相机当前的有效范围。
+
+超出范围的曝光/增益/帧率更新会被拒绝。启动时配置失败会阻止采集启动。运行时更新会先写入设备，然后读回验证。
+
+## 时间戳语义
+
+Image.header.stamp 在 SDK 帧接收并转换完成后，用 ROS 节点时钟（this->now()）生成。因此它是主机侧的 ROS 时间戳，不是相机硬件的曝光时间戳。
+
+Image.header.frame_id 来自 frame_id 参数。
+
+对于发布的 bgr8 图像：
+
+height 和 width 来自接收到的帧。
+
+encoding = "bgr8"。
+
+is_bigendian = false。
+
+step = width * 3。
+
+data.size() = height * step。
+
+## 帧率语义
 
 Three values should not be confused:
 
-1. `frame_rate` is the requested camera acquisition rate.
-2. The configuration log's `actual` value is the value read back from the camera node `AcquisitionFrameRate`.
-3. `Actual receive/pipeline FPS` is measured by this process while receiving, converting and publishing frames. It can be lower than the configured camera rate because Bayer-to-BGR conversion, memory copies, CPU scheduling and ROS publication consume time.
+1.frame_rate 是请求的相机采集帧率。
 
-`ros2 topic hz /image_raw` measures subscriber-observed ROS topic throughput and can differ again.
+2.配置日志中的 actual 值是从相机节点 AcquisitionFrameRate 读回的值。
 
-## Launch
+3.Actual receive/pipeline FPS 是本进程在接收、转换和发布帧期间测得的。它可能低于配置的相机帧率，因为 Bayer 转 BGR、内存拷贝、CPU 调度和 ROS 发布都会消耗时间。
 
-Build and source the workspace, then:
+ros2 topic hz /image_raw 测量的是订阅者观察到的 ROS 话题吞吐量，可能又不一样。
+
+## 启动
+
+构建并 source 工作空间后：
 
 ```zsh
 export ROS_DOMAIN_ID=42
 ros2 launch hikrobot_camera camera.launch.py
 ```
 
-To use a different YAML file:
+使用不同的 YAML 文件：
 
 ```zsh
 ros2 launch hikrobot_camera camera.launch.py params_file:=/absolute/path/to/camera.yaml
 ```
 
-## Runtime parameter examples
+## 运行时参数示例
 
 ```zsh
 ros2 param set /hikrobot_camera exposure 8000.0
@@ -80,18 +105,24 @@ ros2 param set /hikrobot_camera gain 5.0
 ros2 param set /hikrobot_camera frame_rate 50.0
 ```
 
-Startup-only parameters are intentionally rejected if changed at runtime.
+启动时-only 的参数在运行时修改会被有意拒绝。
 
 ## RViz2
 
-Add an **Image** display, select `/image_raw`, and use **Best Effort** reliability with **Volatile** durability to match the sensor-data publisher.
+添加一个 Image 显示，选择 /image_raw，并使用 Best Effort 可靠性和 Volatile 持久性，以匹配传感器数据发布者。
 
-## Reconnection
+## 重连机制
 
-After three consecutive acquisition failures, the node treats the camera as disconnected. It releases SDK resources and retries every second. Once the selected camera is available again, the node reopens it, reapplies pixel format, trigger mode (when supported), exposure, gain, white balance and frame rate, then restarts grabbing.
+连续三次采集失败后，节点将相机视为断开。它释放 SDK 资源并每秒重试。一旦所选相机再次可用，节点重新打开它，重新应用像素格式、触发模式（如果支持）、曝光、增益、白平衡和帧率，然后重新开始采集。
 
-## Notes / limitations
+## 注意事项 / 限制
 
-- The Bayer conversion used here is `cv::COLOR_BayerBG2BGR`, selected from testing with the current camera/SDK image output.
-- GigE enumeration and selection are implemented from the installed MVS SDK structures (`stGigEInfo`, `nCurrentIp`, `chSerialNumber`). If no physical GigE camera is available during testing, document that the GigE path was compile-tested but not hardware-validated.
-- The current design performs acquisition, Bayer conversion and ROS publication in one capture thread. This is simple and robust, but conversion/publication can limit measured throughput below the configured camera FPS.
+- 这里使用的 Bayer 转换是 cv::COLOR_BayerBG2BGR，是根据当前相机/SDK 图像输出测试后选择的。
+
+GigE 枚举和选择是基于已安装的 MVS SDK 结构体（stGigEInfo、nCurrentIp、chSerialNumber）实现的。如果测试时没有可用的物理 GigE 相机，请说明 GigE 路径已通过编译测试但未经过硬件验证。
+
+当前设计在同一个采集线程中执行采集、Bayer 转换和 ROS 发布。这简单且健壮，但转换/发布可能限制实测吞吐量低于配置的相机帧率。
+
+## 作者：邓铭儒
+## 学号：2264413009
+## 日期：2026-9-26
